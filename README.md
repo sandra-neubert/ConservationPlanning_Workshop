@@ -1,7 +1,5 @@
 # Conservation Planning Workshop
 
-# RLadies_SpatPrio_Workshop
-
 Hi all!
 
 Welcome to Sandra and Tin's GitHub repository on Conservation Planning. In this repository you'll find the following:
