@@ -2,13 +2,15 @@
 title: "Prioritisation_Workshop"
 author: "Tin Buenafe and Sandra Neubert"
 date: "`r Sys.Date()`"
-output: 
+output:
   html_document:
     theme: cosmo
-    toc: true
+    toc: yes
     toc_float:
-      collapsed: true
-    code_folding: "hide"
+      collapsed: yes
+    code_folding: hide
+  pdf_document:
+    toc: yes
 ---
 
 
@@ -346,13 +348,14 @@ The **boundary penalty** helps the user decide how "clumped" the network should 
 Set up conservation problem.
 
 ```{r}
+# Add penalties
 datEx_problem_P <- problem(out_sf,
                            features = col_name,
                            cost_column = "cost"
 ) %>%
   add_min_set_objective() %>%
   add_relative_targets(targets$target) %>%
-  add_boundary_penalties(0.5) %>%
+  add_boundary_penalties(0.2) %>%
   add_binary_decisions() %>%
   add_default_solver(gap = 0.5, verbose = FALSE) # Larger optimality gap to speed up code
 ```
@@ -431,7 +434,7 @@ targetsZones <- data.frame(feature = col_name) %>%
   as.matrix()
 
 # Create zones object
-z1 <- prioritizr::zones("zone 1" = col_name, "zone 2" = col_name)
+z1 <- zones("zone 1" = col_name, "zone 2" = col_name)
 
 # Set up conservation problem
 # NOTE: when using sf input, we need as many cost columns as we have zones
@@ -444,14 +447,14 @@ datEx_problem_zones <- prioritizr::problem(
   z1,
   cost_column = c("Cost1", "Cost2")
 ) %>%
-  prioritizr::add_min_set_objective() %>%
-  prioritizr::add_relative_targets(targetsZones) %>%
-  prioritizr::add_binary_decisions() %>%
-  prioritizr::add_default_solver(verbose = FALSE)
+  add_min_set_objective() %>%
+  add_relative_targets(targetsZones) %>%
+  add_binary_decisions() %>%
+  add_default_solver(verbose = FALSE)
 
 # Solve conservation problem
 datEx_soln_zones <- datEx_problem_zones %>%
-  prioritizr::solve.ConservationProblem()
+  solve.ConservationProblem()
 ```
 
 We can examine the solution.
@@ -469,10 +472,10 @@ We can examine the solution.
 
 # Feature representation
 targetsMet_zones <- datEx_soln_zones %>%
-  dplyr::select(tidyselect::starts_with(c("solution"))) %>%
-  sf::st_drop_geometry() %>%
-  tibble::as_tibble() %>%
-  prioritizr::eval_feature_representation_summary(datEx_problem_zones, .)
+  select(tidyselect::starts_with(c("solution"))) %>%
+  st_drop_geometry() %>%
+  as_tibble() %>%
+  eval_feature_representation_summary(datEx_problem_zones, .)
 ```
 
 

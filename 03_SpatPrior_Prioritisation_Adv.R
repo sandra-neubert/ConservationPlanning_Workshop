@@ -1,6 +1,5 @@
-# Workshop Spatial Analysis and Prioritization in R for R Ladies Santa Barbara
-# Part 2: Spatial Prioritization - Creating and solving the conservation problem
-# 02/07/2024
+# Workshop on Conservation Planning (2h)
+# Spatial Prioritization - Creating and solving the conservation problem: Advanced
 # Sandra Neubert (s.neubert@uq.edu.au) and Tin Buenafe (k.buenafe@uq.edu.au)
 
 # Run prioritisation
@@ -8,62 +7,106 @@
 
 # Preliminaries ------------------------------------------------------
 
-source("02_SpatPrior_PrepData.R")
+source("01_SpatPrior_PrepData.R")
 source("utils-functions.R")
 
-# Extract feature names
-col_name <- features %>%
-  select(-"cellID") %>%
-  st_drop_geometry() %>%
-  colnames()
-
-# Create targets object
-# Same target for all
-targets <- rep(0.3, length(col_name))
-
-# Assign higher target for species with tracking data
-targets <- data.frame(feature = col_name) %>%
-  mutate(Category = c(rep("Geomorphic", 8), rep("Tracking Data", 5))) %>%
-  mutate(target = if_else(Category == "Tracking Data", 50 / 100, 5 / 100))
-
-
-# Create a conservation problem -------------------------------------------
-
-# If you already have a solver in your machine, comment these out and make sure that the solver is loaded (e.g., library(gurobi))
-
-# If you are a Windows user, lpsympony might work better
-# if (!require(remotes)) install.packages("remotes")
-# remotes::install_bioc("lpsymphony")
-# Check their website for more details: https://www.bioconductor.org/packages/release/bioc/html/lpsymphony.html
-# library(lpsymphony)
-
-# If you are a Mac/Linux, rcbc might work better
-# if (!require(remotes)) install.packages("remotes")
-# remotes::install_github("dirkschumacher/rcbc")
-# Check their README for more details https://github.com/dirkschumacher/rcbc
-library(rcbc)
-library(lpsymphony)
-
-dat_problem <- problem(out_sf,
-                       features = col_name,
-                       cost_column = "cost") %>%
+# Add penalties
+datEx_problem_P <- problem(out_sf,
+                           features = col_name,
+                           cost_column = "cost"
+) %>%
   add_min_set_objective() %>%
   add_relative_targets(targets$target) %>%
-  #add_boundary_penalties(0.1) %>%
+  add_boundary_penalties(0.2) %>%
+  add_binary_decisions() %>%
+  add_default_solver(gap = 0.5, verbose = FALSE) # Larger optimality gap to speed up code
+
+# Solve problem
+datEx_soln_P <- datEx_problem_P %>%
+  solve.ConservationProblem()
+
+(gg_solnP <- splnr_plot_Solution(datEx_soln_P) +
+    geom_sf(data = landmass, 
+            colour = "black", fill = "black", show.legend = FALSE) +
+    coord_sf(xlim = st_bbox(PUs)$xlim, ylim = st_bbox(PUs)$ylim))
+
+# Add locked-in areas
+# load current MPAs
+
+mpas <- readRDS(file.path(inputDat, "MPAs", "mpas.rds"))
+
+# First look at the data
+(gg_mpas <- ggplot() +
+    geom_sf(data = mpas, aes(fill = .data$mpas), 
+            colour = NA, size = 0.001, show.legend = FALSE))
+
+# Set-up problem
+datEx_problem_LIC <- problem(out_sf,
+                             features = col_name,
+                             cost_column = "cost"
+) %>%
+  add_min_set_objective() %>%
+  add_relative_targets(targets$target) %>%
+  add_locked_in_constraints(as.logical(mpas$mpas)) %>%
   add_binary_decisions() %>%
   add_default_solver(verbose = FALSE)
 
-# Solve conservation problem ----------------------------------------------
-
-dat_soln <- dat_problem %>%
+# Solve conservation problem
+datEx_soln_LIC <- datEx_problem_LIC %>%
   solve.ConservationProblem()
 
-saveRDS(dat_soln, file.path("Output", "Solution1.rds"))
+(gg_solnLIC <- splnr_plot_Solution(datEx_soln_LIC) +
+    geom_sf(data = landmass, 
+            colour = "black", fill = "black", show.legend = FALSE) +
+    coord_sf(xlim = st_bbox(PUs)$xlim, ylim = st_bbox(PUs)$ylim))
 
+# Adding Zones
+# Create Targets
+targetsZones <- data.frame(feature = col_name) %>%
+  mutate(Category = c(rep("Geomorphic", 12), rep("Tracking Data", 5))) %>%
+  mutate(
+    targetZ1 = dplyr::if_else(Category == "Tracking Data", 30 / 100, 0),
+    targetZ2 = dplyr::if_else(Category != "Tracking Data", 10 / 100, 0)
+  ) %>%
+  dplyr::select("targetZ1", "targetZ2") %>%
+  as.matrix()
 
-# Plot the solution -------------------------------------------------------
+# Create zones object
+z1 <- zones("zone 1" = col_name, "zone 2" = col_name)
 
-# Plot solution with predefined function
-(gg_sol <- splnr_plot_Solution(dat_soln))
+# Set up conservation problem
+# NOTE: when using sf input, we need as many cost columns as we have zones
+datEx_problem_zones <- prioritizr::problem(
+  out_sf %>%
+    mutate(
+      Cost1 = rep(1, nrow(.)),
+      Cost2 = rep(1, nrow(.))
+    ),
+  z1,
+  cost_column = c("Cost1", "Cost2")
+) %>%
+  add_min_set_objective() %>%
+  add_relative_targets(targetsZones) %>%
+  add_binary_decisions() %>%
+  add_default_solver(verbose = FALSE)
 
-ggsave(file.path("Figures", "gg_sol.png"),  width = 6, height = 8, dpi = 200)
+# Solve conservation problem
+datEx_soln_zones <- datEx_problem_zones %>%
+  solve.ConservationProblem()
+
+(gg_soln_zones <- splnr_plot_Solution(
+  datEx_soln_zones,
+  zones = TRUE,
+  colorVals = c("#c6dbef", "#3182bd", "#003366"),
+  legendLabels = c("Not selected", "Zone 1", "Zone 2")
+) +
+    geom_sf(data = landmass, 
+            colour = "black", fill = "lightgrey", show.legend = FALSE) +
+    coord_sf(xlim = st_bbox(PUs)$xlim, ylim = st_bbox(PUs)$ylim))
+
+# Feature representation
+targetsMet_zones <- datEx_soln_zones %>%
+  select(tidyselect::starts_with(c("solution"))) %>%
+  st_drop_geometry() %>%
+  as_tibble() %>%
+  eval_feature_representation_summary(datEx_problem_zones, .)
